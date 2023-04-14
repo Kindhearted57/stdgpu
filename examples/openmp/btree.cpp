@@ -19,7 +19,7 @@ insert_neighbors(const int* b_input, const stdgpu::index_t n, stdgpu::btree<int>
         int num_neighborhood[3] = { num - 1, num, num + 1};
         for (int num_neighbor: num_neighborhood){
             // dump everythin into the tree
-            btree.insert()
+            btree.insert(num_neighbor);
         }
     }
 }
