@@ -352,4 +352,5 @@ private:
 };
 
 } // namespace stdgpu
+#include <stdgpu/impl/btree_detail.cuh>
 #endif
