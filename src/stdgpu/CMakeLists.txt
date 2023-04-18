@@ -44,6 +44,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.23)
                                        atomic.cuh
                                        bit.h
                                        bitset.cuh
+                                       btree.cuh
                                        compiler.h
                                        contract.h
                                        cstddef.h
@@ -72,6 +73,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.23)
                                        impl/atomic_detail.cuh
                                        impl/bit_detail.h
                                        impl/bitset_detail.cuh
+                                       impl/btree_detail.cuh
                                        impl/deque_detail.cuh
                                        impl/functional_detail.h
                                        impl/iterator_detail.h
