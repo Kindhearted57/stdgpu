@@ -29,21 +29,21 @@ main()
     const stdgpu::index_t n = 100;
     int * b_input = createDeviceArray<int>(n);
     // I don't understand why every number is contained 3 times, but I set it as this for now.
-    stdgpu::btree<int> btree = stdgpu::btree<int>::createDeviceObject(3*n);
+    stdgpu::btree<int> btree = stdgpu::btree<int>::createDeviceObject(3 * n);
     // doc can be found here
     // https://docs.nvidia.com/cuda/thrust/
 
     thrust::sequence(stdgpu::device_begin(b_input), stdgpu::device_end(b_input), 1);
-    
+
     insert_neighbors(b_input, n, btree);
 
     auto range_btree = btree.device_range();
-    int sum = thrust::reduce(range_btree.begin(), range_btree.end(), 0, thrust:plus<int>());
+    int sum = thrust::reduce(range_btree.begin(), range_btree.end(), 0, thrust::plus<int>());
     const int sum_closed_form = 3 * (n * (n + 1) / 2);
 
-    std::cout << "The set of duplicated numbers contains " << deq.size() << " elements (" << 3 * n
+    std::cout << "The set of duplicated numbers contains " << btree.size() << " elements (" << 3 * n
               << " expected) and the computed sum is " << sum << " (" << sum_closed_form << " expected)" << std::endl;
 
-    destroyDeviceArray<int>(d_input);
-    stdgpu::btree<int>::destroyDeviceObject(btree);   
+    destroyDeviceArray<int>(b_input);
+    stdgpu::btree<int>::destroyDeviceObject(btree);
 }

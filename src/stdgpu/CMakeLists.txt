@@ -44,7 +44,6 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.23)
                                        atomic.cuh
                                        bit.h
                                        bitset.cuh
-                                       btree.cuh
                                        compiler.h
                                        contract.h
                                        cstddef.h
@@ -61,6 +60,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.23)
                                        queue.cuh
                                        ranges.h
                                        stack.cuh
+                                       btree.cuh
                                        unordered_map.cuh
                                        unordered_set.cuh
                                        utility.h
@@ -73,7 +73,6 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.23)
                                        impl/atomic_detail.cuh
                                        impl/bit_detail.h
                                        impl/bitset_detail.cuh
-                                       impl/btree_detail.cuh
                                        impl/deque_detail.cuh
                                        impl/functional_detail.h
                                        impl/iterator_detail.h
@@ -88,6 +87,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.23)
                                        impl/stack_detail.cuh
                                        impl/type_traits.h
                                        impl/unordered_base.cuh
+                                       impl/btree_detail.cuh
                                        impl/unordered_base_detail.cuh
                                        impl/unordered_map_detail.cuh
                                        impl/unordered_set_detail.cuh
@@ -117,6 +117,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
                               mutex.cuh
                               queue.cuh
                               stack.cuh
+                              btree.cuh
                               unordered_map.cuh
                               unordered_set.cuh
                               vector.cuh)
