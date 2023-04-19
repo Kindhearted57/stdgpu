@@ -51,7 +51,8 @@ enum class operation_status
  * \tparam KeyEqual The type of the key equality functor
  * \tparam Allocator The allocator type
  */
-template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename Allocator>
+template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual,
+          typename KeySmaller, typename Allocator>
 class ordered_base
 {
 public:
@@ -63,6 +64,7 @@ public:
 
     using key_from_value = KeyFromValue; /**< KeyFromValue */
     using key_equal = KeyEqual;          /**< KeyEqual */
+    using key_smaller = KeySmaller;
     using hasher = Hash;                 /**< Hash */
 
     using allocator_type = Allocator; /**< Allocator */
@@ -377,6 +379,9 @@ public:
     STDGPU_HOST_DEVICE key_equal
     key_eq() const;
 
+    STDGPU_HOST_DEVICE key_smaller
+    key_sm() const;
+
     using mutex_array_allocator_type =
             typename stdgpu::allocator_traits<allocator_type>::template rebind_alloc<mutex_default_type>;
     using bitset_allocator_type =
@@ -393,8 +398,10 @@ public:
 
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
     value_type* _values = nullptr; /**< The values */
+    value_type* _internal_values = nullptr; /**< The values */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
     index_t* _offsets = nullptr; /**< The offset to model linked list */
+    index_t* _offsets_r = nullptr; /**< The offset to model linked list */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
     bitset<bitset_default_type, bitset_allocator_type> _occupied = {}; /**< The indicator array for occupied entries */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
@@ -415,6 +422,7 @@ public:
     key_from_value _key_from_value = {}; /**< The value to key functor */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
     key_equal _key_equal = {}; /**< The key comparison functor */
+    key_smaller _key_smaller = {}; /**< The key comparison functor */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
     hasher _hash = {}; /**< The hashing function */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
@@ -441,6 +449,10 @@ public:
     template <typename KeyLike>
     STDGPU_DEVICE_ONLY const_iterator
     find_impl(const KeyLike& key) const;
+
+    template <typename KeyLike>
+    STDGPU_DEVICE_ONLY std::pair<const_iterator, std::pair<const_iterator, const_iterator>>
+    internal_search(const KeyLike& key) const;
 
     template <typename KeyLike>
     STDGPU_DEVICE_ONLY bool

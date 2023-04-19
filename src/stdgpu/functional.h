@@ -466,6 +466,25 @@ struct equal_to
     operator()(const T& lhs, const T& rhs) const;
 };
 
+
+/**
+ * \ingroup functional
+ * \brief A function to check smaller to between two values
+ * \tparam T The type of the values
+ */
+template <typename T = void>
+struct smaller
+{
+    /**
+     * \brief Compares two values with each other
+     * \param[in] lhs The first value
+     * \param[in] rhs The second value
+     * \return True if both values are equal, false otherwise
+     */
+    STDGPU_HOST_DEVICE bool
+    operator()(const T& lhs, const T& rhs) const;
+};
+
 /**
  * \ingroup functional
  * \brief A transparent specialization of equal_to
@@ -486,6 +505,28 @@ struct equal_to<void>
     template <typename T, typename U>
     STDGPU_HOST_DEVICE auto
     operator()(T&& lhs, U&& rhs) const -> decltype(forward<T>(lhs) == forward<U>(rhs));
+};
+
+/**
+ * \ingroup functional
+ * \brief A transparent specialization of equal_to
+ */
+template <>
+struct smaller<void>
+{
+    using is_transparent = void; /**< unspecified */
+
+    /**
+     * \brief Compares two values with each other
+     * \tparam T The class of the first value
+     * \tparam U The class of the second value
+     * \param[in] lhs The first value
+     * \param[in] rhs The second value
+     * \return True if both values are equal, false otherwise
+     */
+    template <typename T, typename U>
+    STDGPU_HOST_DEVICE auto
+    operator()(T&& lhs, U&& rhs) const -> decltype(forward<T>(lhs) < forward<U>(rhs));
 };
 
 /**

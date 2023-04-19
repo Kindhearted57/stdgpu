@@ -35,6 +35,7 @@ namespace stdgpu
 template <typename Key,
           typename Hash = hash<Key>,
           typename KeyEqual = equal_to<Key>,
+          typename KeySmaller = smaller<Key>,
           typename Allocator = safe_device_allocator<Key>>
 class btree
 {
@@ -46,6 +47,7 @@ public:
     using difference_type = std::ptrdiff_t; /**< std::ptrdiff_t */
 
     using key_equal = KeyEqual; /**< KeyEqual */
+    using key_smaller = KeySmaller;
     using hasher = Hash;        /**< Hash */
 
     using allocator_type = Allocator; /**< Allocator */
@@ -343,8 +345,16 @@ public:
     STDGPU_HOST_DEVICE key_equal
     key_eq() const;
 
+
+    /**
+     * \brief The key comparator for key equality
+     * \return The key comparator for key equality
+     */
+    STDGPU_HOST_DEVICE key_smaller
+    key_sm() const;
+
 private:
-    using base_type = detail::ordered_base<key_type, value_type, identity, hasher, key_equal, Allocator>;
+    using base_type = detail::ordered_base<key_type, value_type, identity, hasher, key_equal, key_smaller, Allocator>;
 
     explicit btree(base_type&& base);
 
