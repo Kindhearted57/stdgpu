@@ -466,48 +466,30 @@ private:
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
 template <typename KeyLike>
-inline STDGPU_DEVICE_ONLY std::pair<typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator, std::pair<typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator, typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator>>
+inline STDGPU_DEVICE_ONLY pair<index_t, pair<index_t, index_t>>
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::internal_search(const KeyLike& key) const
 {
-    index_t key_index = 0;
-    typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator gp;
-    typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator p;
-    typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator n;
+    index_t key_index = total_count();
+    index_t gp = -1;
+    index_t p = -1;
+    index_t n = -1;
 
-    // first search tree (linked list), go L or R
-    while (key_index < total_count()) {
-//        if ()
-    }
+    n = key_index; // root
 
-
-    // Bucket
-    if (occupied(key_index) && _key_equal(_key_from_value(_values[key_index]), key))
-    {
-        STDGPU_ENSURES(0 <= key_index);
-        STDGPU_ENSURES(key_index < total_count());
-        return _values + key_index;
-    }
-
-    // Linked list
-    while (_offsets[key_index] != 0)
-    {
-        key_index += _offsets[key_index];
-
-        if (occupied(key_index) && _key_equal(_key_from_value(_values[key_index]), key))
-        {
-            STDGPU_ENSURES(0 <= key_index);
-            STDGPU_ENSURES(key_index < total_count());
-            return _values + key_index;
+    while (key_index >= total_count()) {
+        if (_key_equal(key, _internal_values[key_index]) || _key_smaller(key, _internal_values[key_index])) {
+            key_index += _offsets_l[key_index];
+        } else {
+            key_index += _offsets_r[key_index];
         }
+
+        gp = p;
+        p = n;
+        n = key_index;
     }
 
-    return end();
+    return pair<index_t, pair<index_t, index_t>>(gp, pair<index_t, index_t>(p, n));
 }
-
-
-
-
-
 
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -542,17 +524,6 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::b
     if (occupied(key_index))
     {
         result++;
-    }
-
-    // Linked list
-    while (_offsets[key_index] != 0)
-    {
-        key_index += _offsets[key_index];
-
-        if (occupied(key_index))
-        {
-            result++;
-        }
     }
 
     return result;
@@ -621,33 +592,13 @@ template <typename KeyLike>
 inline STDGPU_DEVICE_ONLY typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::find_impl(const KeyLike& key) const
 {
-    index_t key_index = 0;
-
-    // first search tree (linked list), go L or R
-
-
-    // Bucket
-    if (occupied(key_index) && _key_equal(_key_from_value(_values[key_index]), key))
-    {
-        STDGPU_ENSURES(0 <= key_index);
-        STDGPU_ENSURES(key_index < total_count());
+    auto key_index = internal_search(key)->second()->second();
+    if (key_index < total_count() && _key_equal_(_values[key_index], key)) {
         return _values + key_index;
     }
 
-    // Linked list
-    while (_offsets[key_index] != 0)
-    {
-        key_index += _offsets[key_index];
-
-        if (occupied(key_index) && _key_equal(_key_from_value(_values[key_index]), key))
-        {
-            STDGPU_ENSURES(0 <= key_index);
-            STDGPU_ENSURES(key_index < total_count());
-            return _values + key_index;
-        }
-    }
-
     return end();
+
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -671,7 +622,7 @@ template <typename KeyLike>
 inline STDGPU_DEVICE_ONLY bool
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::contains_impl(const KeyLike& key) const
 {
-    return find(key) != end();
+    return find(key).second().second() != end();
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -683,98 +634,87 @@ inline STDGPU_DEVICE_ONLY
     iterator inserted_it = end();
     operation_status status = operation_status::failed_collision;
 
-    key_type block = _key_from_value(value);
+    while (true) {
+        key_type block = _key_from_value(value);
+        auto ret = internal_search(block);
+        auto index = ret.second.second;
+        auto p_index = ret.second.first;
 
-    if (!contains(block))
-    {
-        index_t bucket_index = bucket(block);
-
-        // Bucket
-        if (!occupied(bucket_index))
-        {
-            if (_locks[bucket_index].try_lock())
-            {
-                // START --- critical section --- START
-
-                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
-                if (!contains(block) && !occupied(bucket_index))
-                {
-                    allocator_traits<allocator_type>::construct(_allocator, &(_values[bucket_index]), value);
-                    // Do not touch the linked list
-                    //_offsets[bucket_index] = 0;
-
-                    // Set occupied status after entry has been fully constructed
-                    ++_occupied_count;
-                    bool was_occupied = _occupied.set(bucket_index);
-
-                    inserted_it = begin() + bucket_index;
-                    status = operation_status::success;
-
-                    if (was_occupied)
-                    {
-                        printf("ordered_base::try_insert : Expected entry to be not occupied but actually was\n");
-                    }
-                }
-
-                //  END  --- critical section ---  END
-                _locks[bucket_index].unlock();
-            }
+        if (index < total_count() && _key_equal(block, _values[index])) {
+            status = operation_status::failed_no_action_required;
+            return pair<iterator, operation_status>(inserted_it, status);
         }
-        // Linked list
-        else
-        {
-            index_t linked_list_end = find_linked_list_end(bucket_index);
 
-            if (_locks[linked_list_end].try_lock())
-            {
-                // START --- critical section --- START
+        // create new leaf
+        index_t na_index = bucket(block);
+        index_t n1_index = na_index + total_count();
 
-                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
-                index_t checked_linked_list_end = find_linked_list_end(bucket_index);
-                if (!contains(block) && linked_list_end == checked_linked_list_end)
-                {
-                    pair<index_t, bool> popped = _excess_list_positions.pop_back();
+        // collision
+        if (occupied(na_index) || occupied(n1_index)) {
+            status = operation_status::failed_collision;
+            return pair<iterator, operation_status>(inserted_it, status);
+        }
 
-                    if (!popped.second)
-                    {
-                        printf("ordered_base::try_insert : Associated bucket and excess list full\n");
-                    }
-                    else
-                    {
-                        index_t new_linked_list_end = popped.first;
+        // try lock
+        if (_locks[p_index].try_lock()) {
+            if (_locks[index].try_lock())   {
+                if (_locks[n1_index].try_lock())   {
+                    if (_locks[na_index].try_lock())   {
+                        // everything is locked
 
-                        allocator_traits<allocator_type>::construct(_allocator, &(_values[new_linked_list_end]), value);
-                        _offsets[new_linked_list_end] = 0;
+                        // set the leaf node
+                        allocator_traits<allocator_type>::construct(_allocator, &(_values[na_index]), block);
 
-                        // Set occupied status after entry has been fully constructed
+                        // set the internal node
+                        if (_key_smaller(block, _values[index])) {
+                            allocator_traits<allocator_type>::construct(_allocator, &(_internal_values[n1_index]), block);
+                            _offsets_l[n1_index] = na_index;
+                            _offsets_r[n1_index] = index;
+                        } else {
+                            allocator_traits<allocator_type>::construct(_allocator, &(_internal_values[n1_index]), _values[index]);
+                            _offsets_r[n1_index] = na_index;
+                            _offsets_l[n1_index] = index;
+                        }
+
+                        // then change the parent
+                        if (_offsets_l[p_index] == index) {
+                            _offsets_l[p_index] = n1_index;
+                        } else {
+                            _offsets_r[p_index] = n1_index;
+                        }
+
+                        // finalization, update metadata
                         ++_occupied_count;
-                        bool was_occupied = _occupied.set(new_linked_list_end);
+                        bool was_occupied = _occupied.set(na_index);
 
-                        // Connect new linked list end after its values have been fully initialized and the occupied
-                        // status has been set as try_erase is not resetting offsets
-                        _offsets[linked_list_end] = new_linked_list_end - linked_list_end;
-
-                        inserted_it = begin() + new_linked_list_end;
+                        inserted_it = begin() + na_index;
                         status = operation_status::success;
 
-                        if (was_occupied)
-                        {
-                            printf("ordered_base::try_insert : Expected entry to be not occupied but actually was\n");
-                        }
+
+                        // unlock everything
+                        _locks[na_index].unlock();
+                        _locks[n1_index].unlock();
+                        _locks[index].unlock();
+                        _locks[p_index].unlock();
+
+                        return pair<iterator, operation_status>(inserted_it, status);
+
+                    } else { // na failed
+                        _locks[n1_index].unlock();
+                        _locks[index].unlock();
+                        _locks[p_index].unlock();
                     }
+                } else { // n1 failed
+                    _locks[index].unlock();
+                    _locks[p_index].unlock();
                 }
-
-                //  END  --- critical section ---  END
-                _locks[linked_list_end].unlock();
+            } else { // n failed
+                _locks[p_index].unlock();
             }
-        }
+        } else {
+            // do nothing
+        } // p failed
     }
-    else
-    {
-        status = operation_status::failed_no_action_required;
-    }
-
-    return pair<iterator, operation_status>(inserted_it, status);
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -783,102 +723,102 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::t
         const ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::key_type& key)
 {
     operation_status status = operation_status::failed_collision;
-
-    const_iterator it = find(key);
-    index_t position = static_cast<index_t>(it - cbegin());
-
-    bool contains_block = (it != end());
-    if (contains_block)
-    {
-        index_t bucket_index = bucket(key);
-
-        // Bucket
-        if (position == bucket_index)
-        {
-            if (_locks[position].try_lock())
-            {
-                // START --- critical section --- START
-
-                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
-                const_iterator checked_it = find(key);
-                if (it == checked_it)
-                {
-                    // Set not-occupied status before entry has been fully erased
-                    bool was_occupied = _occupied.reset(position);
-                    --_occupied_count;
-
-                    // Default values
-                    allocator_traits<allocator_type>::destroy(_allocator, &(_values[position]));
-                    // Do not touch the linked list
-                    //_offsets[position] = 0;
-
-                    status = operation_status::success;
-
-                    if (!was_occupied)
-                    {
-                        printf("ordered_base::try_erase : Expected entry to be occupied but actually was not\n");
-                    }
-                }
-
-                //  END  --- critical section ---  END
-                _locks[position].unlock();
-            }
-        }
-        // Linked list
-        else
-        {
-            index_t previous_position = find_previous_entry_position(position, bucket_index);
-
-            if (try_lock(_locks[position], _locks[previous_position]) == -1)
-            {
-                // START --- critical section --- START
-
-                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
-                const_iterator checked_it = find(key);
-                index_t checked_previous_position = find_previous_entry_position(position, bucket_index);
-                if (it == checked_it && previous_position == checked_previous_position)
-                {
-                    // Set offset
-                    if (_offsets[position] != 0)
-                    {
-                        _offsets[previous_position] += _offsets[position];
-                    }
-                    else
-                    {
-                        _offsets[previous_position] = 0;
-                    }
-
-                    // Set not-occupied status before entry has been fully erased
-                    bool was_occupied = _occupied.reset(position);
-                    --_occupied_count;
-
-                    // Default values
-                    allocator_traits<allocator_type>::destroy(_allocator, &(_values[position]));
-                    // Do not reset the offset of the erased linked list entry as another thread executing find() might
-                    // still need it, so make try_insert responsible for resetting it
-                    //_offsets[position] = 0;
-                    _excess_list_positions.push_back(position);
-
-                    status = operation_status::success;
-
-                    if (!was_occupied)
-                    {
-                        printf("ordered_base::try_erase : Expected entry to be occupied but actually was not\n");
-                    }
-                }
-
-                //  END  --- critical section ---  END
-                _locks[position].unlock();
-                _locks[previous_position].unlock();
-            }
-        }
-    }
-    else
-    {
-        status = operation_status::failed_no_action_required;
-    }
-
     return status;
+//    const_iterator it = find(key);
+//    index_t position = static_cast<index_t>(it - cbegin());
+//
+//    bool contains_block = (it != end());
+//    if (contains_block)
+//    {
+//        index_t bucket_index = bucket(key);
+//
+//        // Bucket
+//        if (position == bucket_index)
+//        {
+//            if (_locks[position].try_lock())
+//            {
+//                // START --- critical section --- START
+//
+//                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
+//                const_iterator checked_it = find(key);
+//                if (it == checked_it)
+//                {
+//                    // Set not-occupied status before entry has been fully erased
+//                    bool was_occupied = _occupied.reset(position);
+//                    --_occupied_count;
+//
+//                    // Default values
+//                    allocator_traits<allocator_type>::destroy(_allocator, &(_values[position]));
+//                    // Do not touch the linked list
+//                    //_offsets[position] = 0;
+//
+//                    status = operation_status::success;
+//
+//                    if (!was_occupied)
+//                    {
+//                        printf("ordered_base::try_erase : Expected entry to be occupied but actually was not\n");
+//                    }
+//                }
+//
+//                //  END  --- critical section ---  END
+//                _locks[position].unlock();
+//            }
+//        }
+//        // Linked list
+//        else
+//        {
+//            index_t previous_position = find_previous_entry_position(position, bucket_index);
+//
+//            if (try_lock(_locks[position], _locks[previous_position]) == -1)
+//            {
+//                // START --- critical section --- START
+//
+//                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
+//                const_iterator checked_it = find(key);
+//                index_t checked_previous_position = find_previous_entry_position(position, bucket_index);
+//                if (it == checked_it && previous_position == checked_previous_position)
+//                {
+//                    // Set offset
+//                    if (_offsets[position] != 0)
+//                    {
+//                        _offsets[previous_position] += _offsets[position];
+//                    }
+//                    else
+//                    {
+//                        _offsets[previous_position] = 0;
+//                    }
+//
+//                    // Set not-occupied status before entry has been fully erased
+//                    bool was_occupied = _occupied.reset(position);
+//                    --_occupied_count;
+//
+//                    // Default values
+//                    allocator_traits<allocator_type>::destroy(_allocator, &(_values[position]));
+//                    // Do not reset the offset of the erased linked list entry as another thread executing find() might
+//                    // still need it, so make try_insert responsible for resetting it
+//                    //_offsets[position] = 0;
+//                    _excess_list_positions.push_back(position);
+//
+//                    status = operation_status::success;
+//
+//                    if (!was_occupied)
+//                    {
+//                        printf("ordered_base::try_erase : Expected entry to be occupied but actually was not\n");
+//                    }
+//                }
+//
+//                //  END  --- critical section ---  END
+//                _locks[position].unlock();
+//                _locks[previous_position].unlock();
+//            }
+//        }
+//    }
+//    else
+//    {
+//        status = operation_status::failed_no_action_required;
+//    }
+//
+//    return status;
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -886,14 +826,7 @@ inline STDGPU_DEVICE_ONLY index_t
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::find_linked_list_end(
         const index_t linked_list_start)
 {
-    index_t linked_list_end = linked_list_start;
-
-    while (_offsets[linked_list_end] != 0)
-    {
-        linked_list_end += _offsets[linked_list_end];
-    }
-
-    return linked_list_end;
+    return end();
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -902,26 +835,7 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::f
         const index_t entry_position,
         const index_t linked_list_start)
 {
-    bool position_found = false;
-    index_t previous_position = linked_list_start;
-    index_t key_index = linked_list_start;
-
-    while (_offsets[key_index] != 0)
-    {
-        // Next entry
-        key_index += _offsets[key_index];
-        position_found = (key_index == entry_position);
-
-        if (position_found)
-        {
-            break;
-        }
-
-        // Increment previous (--> equal to key_index)
-        previous_position = key_index;
-    }
-
-    return previous_position;
+    return end();
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -1120,7 +1034,8 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::c
                        destroy_values<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>(*this));
     }
 
-    fill(execution::device, device_begin(_offsets), device_end(_offsets), 0);
+    fill(execution::device, device_begin(_offsets_l), device_end(_offsets_l), 0);
+    fill(execution::device, device_begin(_offsets_r), device_end(_offsets_r), 0);
 
     _occupied.reset();
 
@@ -1159,7 +1074,7 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::c
     result._bucket_count = bucket_count;
     result._values = detail::createUninitializedDeviceArray<value_type, allocator_type>(result._allocator, total_count);
     result._internal_values = detail::createUninitializedDeviceArray<value_type, allocator_type>(result._allocator, total_count);
-    result._offsets = createDeviceArray<index_t, index_allocator_type>(result._index_allocator, total_count, 0);
+    result._offsets_l = createDeviceArray<index_t, index_allocator_type>(result._index_allocator, total_count, 0);
     result._offsets_r = createDeviceArray<index_t, index_allocator_type>(result._index_allocator, total_count, 0);
     result._range_indices =
             detail::createUninitializedDeviceArray<index_t, index_allocator_type>(result._index_allocator, total_count);
@@ -1186,7 +1101,8 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::d
     }
 
     device_object._bucket_count = 0;
-    destroyDeviceArray<index_t, index_allocator_type>(device_object._index_allocator, device_object._offsets);
+    destroyDeviceArray<index_t, index_allocator_type>(device_object._index_allocator, device_object._offsets_l);
+    destroyDeviceArray<index_t, index_allocator_type>(device_object._index_allocator, device_object._offsets_r);
     detail::destroyUninitializedDeviceArray<index_t, index_allocator_type>(device_object._index_allocator,
                                                                            device_object._range_indices);
     bitset<bitset_default_type, bitset_allocator_type>::destroyDeviceObject(device_object._occupied);

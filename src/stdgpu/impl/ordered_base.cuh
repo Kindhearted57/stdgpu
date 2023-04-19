@@ -400,7 +400,7 @@ public:
     value_type* _values = nullptr; /**< The values */
     value_type* _internal_values = nullptr; /**< The values */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
-    index_t* _offsets = nullptr; /**< The offset to model linked list */
+    index_t* _offsets_l = nullptr; /**< The offset to model linked list */
     index_t* _offsets_r = nullptr; /**< The offset to model linked list */
     // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
     bitset<bitset_default_type, bitset_allocator_type> _occupied = {}; /**< The indicator array for occupied entries */
@@ -451,7 +451,7 @@ public:
     find_impl(const KeyLike& key) const;
 
     template <typename KeyLike>
-    STDGPU_DEVICE_ONLY std::pair<const_iterator, std::pair<const_iterator, const_iterator>>
+    STDGPU_DEVICE_ONLY pair<index_t, pair<index_t, index_t>>
     internal_search(const KeyLike& key) const;
 
     template <typename KeyLike>
