@@ -89,6 +89,8 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.23)
                                        impl/unordered_base.cuh
                                        impl/btree_detail.cuh
                                        impl/unordered_base_detail.cuh
+                                       impl/ordered_base.cuh
+                                       impl/ordered_base_detail.cuh
                                        impl/unordered_map_detail.cuh
                                        impl/unordered_set_detail.cuh
                                        impl/utility_detail.h

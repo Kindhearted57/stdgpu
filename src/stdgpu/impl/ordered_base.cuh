@@ -1,52 +1,69 @@
-#ifndef STDGPU_BTREE_H
-#define STDGPU_BTREE_H
+/*
+ *  Copyright 2019 Patrick Stotko
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
+#ifndef STDGPU_ORDERED_BASE_H
+#define STDGPU_ORDERED_BASE_H
+
+#include <stdgpu/atomic.cuh>
+#include <stdgpu/bitset.cuh>
+#include <stdgpu/cstddef.h>
 #include <stdgpu/functional.h>
 #include <stdgpu/impl/type_traits.h>
-#include <stdgpu/impl/ordered_base.cuh>
+#include <stdgpu/iterator.h>
 #include <stdgpu/memory.h>
+#include <stdgpu/mutex.cuh>
 #include <stdgpu/platform.h>
+#include <stdgpu/ranges.h>
 #include <stdgpu/utility.h>
+#include <stdgpu/vector.cuh>
 
-
-namespace stdgpu
+namespace stdgpu::detail
 {
 
 /**
- * \ingroup unordered_set
- * \brief A generic container similar to std::unordered_set on the GPU
+ * \brief Status flags for try_insert and try_erase
+ */
+enum class operation_status
+{
+    success,                   /**< Operation succeeded */
+    failed_no_action_required, /**< Operation failed because no action is required */
+    failed_collision           /**< Operation failed because of a conflict with another thread */
+};
+
+/**
+ * \brief The base class serving as the shared implementation of ordered_map and ordered_set
  * \tparam Key The key type
+ * \tparam Value The value type
+ * \tparam KeyFromValue The type of the value to key functor
  * \tparam Hash The type of the hash functor
  * \tparam KeyEqual The type of the key equality functor
  * \tparam Allocator The allocator type
- *
- * Differences to std::unordered_set:
- *  - index_type instead of size_type
- *  - Manual allocation and destruction of container required
- *  - max_size and capacity limited to initially allocated size
- *  - No guaranteed valid state when reaching capacity limit
- *  - Additional non-standard capacity functions full() and valid()
- *  - Some member functions missing
- *  - Iterators may point at non-occupied and non-valid hash entry
- *  - Difference between begin() and end() returns max_size() rather than size()
- *  - Insert function returns iterator to end() rather than to the element preventing insertion
- *  - Range insert and erase functions use iterators to value_type and key_type
  */
-template <typename Key,
-          typename Hash = hash<Key>,
-          typename KeyEqual = equal_to<Key>,
-          typename Allocator = safe_device_allocator<Key>>
-class btree
+template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename Allocator>
+class ordered_base
 {
 public:
-    using key_type = Key;   /**< Key */
-    using value_type = Key; /**< Key */
+    using key_type = Key;     /**< Key */
+    using value_type = Value; /**< Value */
 
     using index_type = index_t;             /**< index_t */
     using difference_type = std::ptrdiff_t; /**< std::ptrdiff_t */
 
-    using key_equal = KeyEqual; /**< KeyEqual */
-    using hasher = Hash;        /**< Hash */
+    using key_from_value = KeyFromValue; /**< KeyFromValue */
+    using key_equal = KeyEqual;          /**< KeyEqual */
+    using hasher = Hash;                 /**< Hash */
 
     using allocator_type = Allocator; /**< Allocator */
 
@@ -54,7 +71,7 @@ public:
     using const_reference = const value_type&; /**< const value_type& */
     using pointer = value_type*;               /**< value_type* */
     using const_pointer = const value_type*;   /**< const value_type* */
-    using iterator = const_pointer;            /**< const_pointer */
+    using iterator = pointer;                  /**< pointer */
     using const_iterator = const_pointer;      /**< const_pointer */
 
     /**
@@ -64,20 +81,20 @@ public:
      * \pre capacity > 0
      * \return A newly created object of this class allocated on the GPU (device)
      */
-    static btree
-    createDeviceObject(const index_t& capacity, const Allocator& allocator = Allocator());
+    static ordered_base
+    createDeviceObject(const index_t& capacity, const Allocator& allocator);
 
     /**
      * \brief Destroys the given object of this class on the GPU (device)
      * \param[in] device_object The object allocated on the GPU (device)
      */
     static void
-    destroyDeviceObject(btree& device_object);
+    destroyDeviceObject(ordered_base& device_object);
 
     /**
      * \brief Empty constructor
      */
-    btree() noexcept = default;
+    ordered_base() noexcept = default;
 
     /**
      * \brief Returns the container allocator
@@ -232,6 +249,23 @@ public:
     contains(const KeyLike& key) const;
 
     /**
+     * \brief Inserts the given value into the container if possible
+     * \param[in] value The new value
+     * \return An iterator to the inserted pair and the operation_status::success if the insertion was successful, end()
+     * and failure status otherwise
+     */
+    STDGPU_DEVICE_ONLY pair<iterator, operation_status>
+    try_insert(const value_type& value);
+
+    /**
+     * \brief Deletes any values with the given given key from the container if possible
+     * \param[in] key The key
+     * \return operation_status::success if there was a value with key and it got erased, failure status otherwise
+     */
+    STDGPU_DEVICE_ONLY operation_status
+    try_erase(const key_type& key);
+
+    /**
      * \brief Inserts the given value into the container
      * \param[in] args The arguments to construct the element
      * \return An iterator to the inserted pair and true if the insertion was successful, end() and false otherwise
@@ -343,14 +377,82 @@ public:
     STDGPU_HOST_DEVICE key_equal
     key_eq() const;
 
-private:
-    using base_type = detail::ordered_base<key_type, value_type, identity, hasher, key_equal, Allocator>;
+    using mutex_array_allocator_type =
+            typename stdgpu::allocator_traits<allocator_type>::template rebind_alloc<mutex_default_type>;
+    using bitset_allocator_type =
+            typename stdgpu::allocator_traits<allocator_type>::template rebind_alloc<bitset_default_type>;
+    using atomic_allocator_type = typename stdgpu::allocator_traits<allocator_type>::template rebind_alloc<int>;
+    using index_allocator_type = typename stdgpu::allocator_traits<allocator_type>::template rebind_alloc<index_t>;
 
-    explicit btree(base_type&& base);
+    ordered_base(const bitset<bitset_default_type, bitset_allocator_type>& occupied,
+                   const atomic<int, atomic_allocator_type>& occupied_count,
+                   const vector<index_t, index_allocator_type>& excess_list_positions,
+                   const mutex_array<mutex_default_type, mutex_array_allocator_type>& locks,
+                   const atomic<int, atomic_allocator_type>& range_indices_end,
+                   const Allocator& allocator);
 
-    base_type _base = {};
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    value_type* _values = nullptr; /**< The values */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    index_t* _offsets = nullptr; /**< The offset to model linked list */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    bitset<bitset_default_type, bitset_allocator_type> _occupied = {}; /**< The indicator array for occupied entries */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    atomic<int, atomic_allocator_type> _occupied_count = {}; /**< The number of occupied entries */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    vector<index_t, index_allocator_type> _excess_list_positions = {}; /**< The excess list positions */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    mutex_array<mutex_default_type, mutex_array_allocator_type>
+            // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+            _locks = {}; /**< The locks used to insert and erase entries */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    mutable index_t* _range_indices = nullptr; /**< The offset to model linked list */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    mutable atomic<int, atomic_allocator_type> _range_indices_end = {}; /**< The number of occupied entries */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    index_t _bucket_count = 0; /**< The number of buckets */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    key_from_value _key_from_value = {}; /**< The value to key functor */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    key_equal _key_equal = {}; /**< The key comparison functor */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    hasher _hash = {}; /**< The hashing function */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    allocator_type _allocator = {}; /**< The allocator */
+    // NOLINTNEXTLINE(misc-non-private-member-variables-in-classes)
+    index_allocator_type _index_allocator = {}; /**< The index allocator */
+
+    STDGPU_HOST_DEVICE index_t
+    total_count() const noexcept;
+
+    STDGPU_DEVICE_ONLY bool
+    occupied(const index_t n) const;
+
+    STDGPU_DEVICE_ONLY index_t
+    find_linked_list_end(const index_t linked_list_start);
+
+    STDGPU_DEVICE_ONLY index_t
+    find_previous_entry_position(const index_t entry_position, const index_t linked_list_start);
+
+    template <typename KeyLike>
+    STDGPU_DEVICE_ONLY index_type
+    count_impl(const KeyLike& key) const;
+
+    template <typename KeyLike>
+    STDGPU_DEVICE_ONLY const_iterator
+    find_impl(const KeyLike& key) const;
+
+    template <typename KeyLike>
+    STDGPU_DEVICE_ONLY bool
+    contains_impl(const KeyLike& key) const;
+
+    template <typename KeyLike>
+    STDGPU_HOST_DEVICE index_type
+    bucket_impl(const KeyLike& key) const;
 };
 
-} // namespace stdgpu
-#include <stdgpu/impl/btree_detail.cuh>
-#endif
+} // namespace stdgpu::detail
+
+#include <stdgpu/impl/ordered_base_detail.cuh>
+
+#endif // STDGPU_ORDERED_BASE_H
