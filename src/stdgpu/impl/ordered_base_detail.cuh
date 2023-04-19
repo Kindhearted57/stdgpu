@@ -685,7 +685,8 @@ inline STDGPU_DEVICE_ONLY
 
                         // finalization, update metadata
                         ++_occupied_count;
-                        bool was_occupied = _occupied.set(na_index);
+                        _occupied.set(na_index);
+                        _occupied.set(n1_index);
 
                         inserted_it = begin() + na_index;
                         status = operation_status::success;
@@ -723,102 +724,103 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::t
         const ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::key_type& key)
 {
     operation_status status = operation_status::failed_collision;
+
+    while (true) {
+        auto ret = internal_search(key);
+        auto index = ret.second.second;
+        auto p_index = ret.second.first;
+        auto gp_index = ret.first;
+
+        if (index < total_count() && !_key_equal(key, _values[index])) {
+            status = operation_status::failed_no_action_required;
+            return status;
+        }
+
+        // check grand parent
+        if (!(_key_equal(p_index, _offsets_l[gp_index]) || _key_equal(p_index, _offsets_r[gp_index]))) {
+            continue;
+        }
+
+        // check parent
+        if (!(_key_equal(index, _offsets_l[p_index]) || _key_equal(index, _offsets_r[p_index]))) {
+            continue;
+        }
+
+        // try lock
+        if (_locks[p_index].try_lock()) {
+            if (_locks[index].try_lock())   {
+                if (_locks[gp_index].try_lock())   {
+
+                    // get the other children of p
+                    index_t pc_index = 0;
+                    if (_key_equal(_offsets_l[p_index], index)) {
+                        pc_index = _offsets_r[p_index];
+                    } else {
+                        pc_index = _offsets_l[p_index];
+                    }
+
+                    if (_locks[pc_index].try_lock())   {
+                        // everything is locked
+
+                        // change children of gp to the other children
+                        if (_key_equal(_offsets_l[p_index], index)) {
+                            _offsets_l[gp_index] = pc_index;
+                        } else {
+                            _offsets_r[gp_index] = pc_index;
+                        }
+
+                        // finalization, update metadata
+                        allocator_traits<allocator_type>::destroy(_allocator, &(_internal_values[p_index - total_count()]));
+                        --_occupied_count;
+
+                        // if has children
+                        if (_occupied[_offsets_l[p_index]]) {
+                            allocator_traits<allocator_type>::destroy(_allocator, &(_values[_offsets_l[p_index]]));
+                            --_occupied_count;
+                            _occupied.reset(_offsets_l[p_index]);
+                            _offsets_l[_offsets_l[p_index]] = -1;
+                            _offsets_r[_offsets_l[p_index]] = -1;
+                        }
+
+                        if (_occupied[_offsets_r[p_index]]) {
+                            allocator_traits<allocator_type>::destroy(_allocator, &(_values[_offsets_r[p_index]]));
+                            --_occupied_count;
+                            _occupied.reset(_offsets_r[p_index]);
+                            _offsets_l[_offsets_r[p_index]] = -1;
+                            _offsets_r[_offsets_r[p_index]] = -1;
+                        }
+
+                        // clean itself
+                        _occupied.reset(p_index);
+                        _offsets_l[p_index] = -1;
+                        _offsets_r[p_index] = -1;
+                        status = operation_status::success;
+
+                        // unlock everything
+                        _locks[pc_index].unlock();
+                        _locks[gp_index].unlock();
+                        _locks[index].unlock();
+                        _locks[p_index].unlock();
+
+                        return status;
+
+                    } else { // na failed
+                        _locks[gp_index].unlock();
+                        _locks[index].unlock();
+                        _locks[p_index].unlock();
+                    }
+                } else { // n1 failed
+                    _locks[index].unlock();
+                    _locks[p_index].unlock();
+                }
+            } else { // n failed
+                _locks[p_index].unlock();
+            }
+        } else {
+            // do nothing
+        } // p failed
+    }
     return status;
-//    const_iterator it = find(key);
-//    index_t position = static_cast<index_t>(it - cbegin());
-//
-//    bool contains_block = (it != end());
-//    if (contains_block)
-//    {
-//        index_t bucket_index = bucket(key);
-//
-//        // Bucket
-//        if (position == bucket_index)
-//        {
-//            if (_locks[position].try_lock())
-//            {
-//                // START --- critical section --- START
-//
-//                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
-//                const_iterator checked_it = find(key);
-//                if (it == checked_it)
-//                {
-//                    // Set not-occupied status before entry has been fully erased
-//                    bool was_occupied = _occupied.reset(position);
-//                    --_occupied_count;
-//
-//                    // Default values
-//                    allocator_traits<allocator_type>::destroy(_allocator, &(_values[position]));
-//                    // Do not touch the linked list
-//                    //_offsets[position] = 0;
-//
-//                    status = operation_status::success;
-//
-//                    if (!was_occupied)
-//                    {
-//                        printf("ordered_base::try_erase : Expected entry to be occupied but actually was not\n");
-//                    }
-//                }
-//
-//                //  END  --- critical section ---  END
-//                _locks[position].unlock();
-//            }
-//        }
-//        // Linked list
-//        else
-//        {
-//            index_t previous_position = find_previous_entry_position(position, bucket_index);
-//
-//            if (try_lock(_locks[position], _locks[previous_position]) == -1)
-//            {
-//                // START --- critical section --- START
-//
-//                // !!! VERIFY CONDITIONS HAVE NOT CHANGED !!!
-//                const_iterator checked_it = find(key);
-//                index_t checked_previous_position = find_previous_entry_position(position, bucket_index);
-//                if (it == checked_it && previous_position == checked_previous_position)
-//                {
-//                    // Set offset
-//                    if (_offsets[position] != 0)
-//                    {
-//                        _offsets[previous_position] += _offsets[position];
-//                    }
-//                    else
-//                    {
-//                        _offsets[previous_position] = 0;
-//                    }
-//
-//                    // Set not-occupied status before entry has been fully erased
-//                    bool was_occupied = _occupied.reset(position);
-//                    --_occupied_count;
-//
-//                    // Default values
-//                    allocator_traits<allocator_type>::destroy(_allocator, &(_values[position]));
-//                    // Do not reset the offset of the erased linked list entry as another thread executing find() might
-//                    // still need it, so make try_insert responsible for resetting it
-//                    //_offsets[position] = 0;
-//                    _excess_list_positions.push_back(position);
-//
-//                    status = operation_status::success;
-//
-//                    if (!was_occupied)
-//                    {
-//                        printf("ordered_base::try_erase : Expected entry to be occupied but actually was not\n");
-//                    }
-//                }
-//
-//                //  END  --- critical section ---  END
-//                _locks[position].unlock();
-//                _locks[previous_position].unlock();
-//            }
-//        }
-//    }
-//    else
-//    {
-//        status = operation_status::failed_no_action_required;
-//    }
-//
-//    return status;
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
