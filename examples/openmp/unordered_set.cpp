@@ -86,7 +86,7 @@ main()
 
         long long  sum_closed_form = (long long)n * ((long long )n + 1) / 2;
 
-        std::cout << "The duplicate-free set of numbers contains " << set.size() << " elements (" << n
+        std::cout << "After insertion the set contains " << set.size() << " elements (" << n
                   << " expected) and the computed sum is " << sum << " (" << sum_closed_form << " expected)" << std::endl;
 
         start = std::chrono::system_clock::now();
@@ -99,7 +99,7 @@ main()
 
         sum_closed_form = n * (n + 1) / 2;
 
-        std::cout << "The duplicate-free set of numbers contains " << set.size() << " elements (" << 0
+        std::cout << "After insertion the set contains " << set.size() << " elements (" << 0
                   << " expected) and the computed sum is " << sum << " (" << 0<< " expected)" << std::endl;
 
 

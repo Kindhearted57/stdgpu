@@ -63,7 +63,7 @@ main()
         long long sum = thrust::reduce(range_btree.begin(), range_btree.end(), 0, thrust::plus<int>());
         long long sum_closed_form = (long long)n * ((long long )n + 1) / 2;
 
-        std::cout << "The set of duplicated numbers contains " << btree.size() << " elements (" << n
+        std::cout << "After insertion the tree contains " << btree.size() << " elements (" << n
                   << " expected) and the computed sum is " << sum << " (" << sum_closed_form << " expected)" << std::endl;
 
         start = std::chrono::system_clock::now();
@@ -75,7 +75,7 @@ main()
         sum = thrust::reduce(range_btree.begin(), range_btree.end(), 0, thrust::plus<int>());
         const int sum_closed_form2 = 0;
 
-        std::cout << "The set of duplicated numbers contains " << btree.size() << " elements (" << 0
+        std::cout << "After insertion the tree contains " << btree.size() << " elements (" << 0
                   << " expected) and the computed sum is " << sum << " (" << sum_closed_form2 << " expected)" << std::endl;
 
         destroyDeviceArray<int>(b_input);
