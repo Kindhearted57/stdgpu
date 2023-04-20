@@ -1,0 +1,21 @@
+1 -> Key
+2 -> Internal Key
+3 -> Left child
+4 -> Right child
+
+Example:
+
+The results from search returns (gp, p, n)
+
+Create new leaf:
+
+na_index = bucket(block)
+n1_index = na_index + total_count()
+
+1 -> | * | * | * | * | * | * | * | * | * | * | * | * | * | * | * |
+	          ^^^  na_index
+2 -> | * | * | * | * | * | * | * | * | * | * | * | * | * | * | * |
+		  ^^^ n1_index
+3 _> | * | * | * | * | * | * | * | * | * | * | * | * | * | * | * | 
+                  ^^^ left child
+
