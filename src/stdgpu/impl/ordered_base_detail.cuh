@@ -80,7 +80,7 @@ fibonacci_hashing(const std::size_t hash, const index_t bucket_count)
     STDGPU_ENSURES(0 <= result);
     STDGPU_ENSURES(result < bucket_count);
 
-    return result;
+    return result + 1;
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -469,24 +469,26 @@ template <typename KeyLike>
 inline STDGPU_DEVICE_ONLY pair<index_t, pair<index_t, index_t>>
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::internal_search(const KeyLike& key) const
 {
-    index_t key_index = total_count();
+    index_t key_index = total_count() / 2;
     index_t gp = -1;
     index_t p = -1;
     index_t n = -1;
 
     n = key_index; // root
 
-    while (key_index >= total_count()) {
-        if (_key_equal(key, _internal_values[key_index]) || _key_smaller(key, _internal_values[key_index])) {
-            key_index += _offsets_l[key_index];
+    while (key_index >= total_count() / 2) {
+//        fprintf(stderr, "[IS] key: %d\n", key_index);
+        if (_key_equal(key, _internal_values[key_index - total_count() / 2]) || _key_smaller(key, _internal_values[key_index - total_count() / 2])) {
+            key_index = _offsets_l[key_index];
         } else {
-            key_index += _offsets_r[key_index];
+            key_index = _offsets_r[key_index];
         }
 
         gp = p;
         p = n;
         n = key_index;
     }
+    fprintf(stderr, "[IS]: gp: %d, p: %d, n: %d\n", gp, p, n);
 
     return pair<index_t, pair<index_t, index_t>>(gp, pair<index_t, index_t>(p, n));
 }
@@ -633,6 +635,7 @@ inline STDGPU_DEVICE_ONLY
 {
     iterator inserted_it = end();
     operation_status status = operation_status::failed_collision;
+    fprintf(stderr, "[TI]: key: %d\n", value);
 
     while (true) {
         key_type block = _key_from_value(value);
@@ -640,18 +643,22 @@ inline STDGPU_DEVICE_ONLY
         auto index = ret.second.second;
         auto p_index = ret.second.first;
 
-        if (index < total_count() && _key_equal(block, _values[index])) {
+        if (index < total_count() / 2 && _key_equal(block, _values[index])) {
+            fprintf(stderr, "[TI]: exist at %d\n", index);
             status = operation_status::failed_no_action_required;
             return pair<iterator, operation_status>(inserted_it, status);
         }
 
         // create new leaf
-        index_t na_index = bucket(block);
-        index_t n1_index = na_index + total_count();
+        index_t na_index = bucket(block) / 2;
+        index_t n1_index = na_index + total_count() / 2;
+        fprintf(stderr, "[TI]: na_index: %d, n1_index: %d\n", na_index, n1_index);
 
         // collision
         if (occupied(na_index) || occupied(n1_index)) {
-            status = operation_status::failed_collision;
+            fprintf(stderr, "[TI]: occupied at %d or %d\n", na_index, n1_index);
+            fprintf(stderr, "[TI]: na: %d, n1: %d\n", _values[na_index], _internal_values[na_index]);
+            status = operation_status::failed_no_action_required;
             return pair<iterator, operation_status>(inserted_it, status);
         }
 
@@ -661,17 +668,18 @@ inline STDGPU_DEVICE_ONLY
                 if (_locks[n1_index].try_lock())   {
                     if (_locks[na_index].try_lock())   {
                         // everything is locked
+                        fprintf(stderr, "Lock succeed\n");
 
                         // set the leaf node
                         allocator_traits<allocator_type>::construct(_allocator, &(_values[na_index]), block);
 
                         // set the internal node
                         if (_key_smaller(block, _values[index])) {
-                            allocator_traits<allocator_type>::construct(_allocator, &(_internal_values[n1_index]), block);
+                            allocator_traits<allocator_type>::construct(_allocator, &(_internal_values[na_index]), block);
                             _offsets_l[n1_index] = na_index;
                             _offsets_r[n1_index] = index;
                         } else {
-                            allocator_traits<allocator_type>::construct(_allocator, &(_internal_values[n1_index]), _values[index]);
+                            allocator_traits<allocator_type>::construct(_allocator, &(_internal_values[na_index]), _values[index]);
                             _offsets_r[n1_index] = na_index;
                             _offsets_l[n1_index] = index;
                         }
@@ -920,6 +928,7 @@ inline STDGPU_DEVICE_ONLY bool
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::occupied(const index_t n) const
 {
     STDGPU_EXPECTS(0 <= n);
+    fprintf(stderr, "n: %d, tc: %d\n", n, total_count());
     STDGPU_EXPECTS(n < total_count());
 
     return _occupied[n];
@@ -1086,6 +1095,14 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::c
     result._key_smaller = key_smaller();
 
     detail::vector_clear_iota<index_t, index_allocator_type>(result._excess_list_positions, bucket_count);
+
+    // init the tree
+    allocator_traits<allocator_type>::construct(result._allocator, &(result._values[total_count - 1]), 0x3f3f3f3f);
+    allocator_traits<allocator_type>::construct(result._allocator, &(result._values[0]), -0x3f3f3f3f);
+
+    allocator_traits<allocator_type>::construct(result._allocator, &(result._internal_values[0]), -0x3f3f3f3f);
+    result._offsets_l[0] = 0;
+    result._offsets_r[0] = total_count - 1;
 
     STDGPU_ENSURES(result._excess_list_positions.full());
 
