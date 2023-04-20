@@ -477,10 +477,13 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::i
     n = key_index; // root
 
     while (key_index >= total_count() / 2) {
-//        fprintf(stderr, "[IS] key: %d\n", key_index);
+//        fprintf(stderr, "[IS] key: %d compared id: %d\n", key_index, key_index - total_count() / 2);
+//        fprintf(stderr, "compare result: %d\n", _key_smaller(key, _internal_values[key_index - total_count() / 2]));
         if (_key_equal(key, _internal_values[key_index - total_count() / 2]) || _key_smaller(key, _internal_values[key_index - total_count() / 2])) {
-            key_index = _offsets_l[key_index];
+             if (key == 3) fprintf(stderr, "go left: %d\n", _offsets_l[key_index]);
+             key_index = _offsets_l[key_index];
         } else {
+            if (key == 3) fprintf(stderr, "go right: %d\n", _offsets_r[key_index]);
             key_index = _offsets_r[key_index];
         }
 
@@ -594,7 +597,7 @@ template <typename KeyLike>
 inline STDGPU_DEVICE_ONLY typename ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::const_iterator
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::find_impl(const KeyLike& key) const
 {
-    auto key_index = internal_search(key)->second()->second();
+    auto key_index = internal_search(key).second.second;
     if (key_index < total_count() && _key_equal_(_values[key_index], key)) {
         return _values + key_index;
     }
@@ -683,12 +686,15 @@ inline STDGPU_DEVICE_ONLY
                             _offsets_r[n1_index] = na_index;
                             _offsets_l[n1_index] = index;
                         }
+                        fprintf(stderr, "[TI]: set %d l: %d, r: %d\n", n1_index, _offsets_l[n1_index], _offsets_r[n1_index]);
 
                         // then change the parent
                         if (_offsets_l[p_index] == index) {
                             _offsets_l[p_index] = n1_index;
+                            fprintf(stderr, "[TI]: set l of %d from %d to %d\n", p_index, index, _offsets_l[p_index]);
                         } else {
                             _offsets_r[p_index] = n1_index;
+                            fprintf(stderr, "[TI]: set r of %d from %d to %d\n", p_index, index, _offsets_r[p_index]);
                         }
 
                         // finalization, update metadata
@@ -739,12 +745,14 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::t
         auto p_index = ret.second.first;
         auto gp_index = ret.first;
 
-        if (index < total_count() && !_key_equal(key, _values[index])) {
+        if (index < total_count() / 2 && !_key_equal(key, _values[index])) {
             status = operation_status::failed_no_action_required;
+            fprintf(stderr, "[RM]: remove %d failed with index: %d, value %d\n", key, index, _values[index]);
+            fprintf(stderr, "[RM]: l: %d, r: %d\n", _offsets_l[p_index], _offsets_r[p_index]);
             return status;
         }
 
-        // check grand parent
+        // check grandparent
         if (!(_key_equal(p_index, _offsets_l[gp_index]) || _key_equal(p_index, _offsets_r[gp_index]))) {
             continue;
         }
@@ -771,37 +779,39 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::t
                         // everything is locked
 
                         // change children of gp to the other children
-                        if (_key_equal(_offsets_l[p_index], index)) {
+                        if (_key_equal(_offsets_l[gp_index], p_index)) {
                             _offsets_l[gp_index] = pc_index;
                         } else {
                             _offsets_r[gp_index] = pc_index;
                         }
 
                         // finalization, update metadata
-                        allocator_traits<allocator_type>::destroy(_allocator, &(_internal_values[p_index - total_count()]));
-                        --_occupied_count;
+                        allocator_traits<allocator_type>::destroy(_allocator, &(_internal_values[p_index - total_count() / 2]));
 
                         // if has children
-                        if (_occupied[_offsets_l[p_index]]) {
+                        if (_occupied[_offsets_l[p_index]] && pc_index != _offsets_l[p_index]) {
+                            fprintf(stderr, "[RM]: remove leaf %d\n", _values[_offsets_l[p_index]]);
                             allocator_traits<allocator_type>::destroy(_allocator, &(_values[_offsets_l[p_index]]));
-                            --_occupied_count;
                             _occupied.reset(_offsets_l[p_index]);
                             _offsets_l[_offsets_l[p_index]] = -1;
                             _offsets_r[_offsets_l[p_index]] = -1;
+                            --_occupied_count;
                         }
 
-                        if (_occupied[_offsets_r[p_index]]) {
+                        if (_occupied[_offsets_r[p_index]] && pc_index != _offsets_r[p_index]) {
+                            fprintf(stderr, "[RM]: remove leaf %d\n", _values[_offsets_r[p_index]]);
                             allocator_traits<allocator_type>::destroy(_allocator, &(_values[_offsets_r[p_index]]));
-                            --_occupied_count;
                             _occupied.reset(_offsets_r[p_index]);
                             _offsets_l[_offsets_r[p_index]] = -1;
                             _offsets_r[_offsets_r[p_index]] = -1;
+                            --_occupied_count;
                         }
 
                         // clean itself
                         _occupied.reset(p_index);
                         _offsets_l[p_index] = -1;
                         _offsets_r[p_index] = -1;
+
                         status = operation_status::success;
 
                         // unlock everything
@@ -810,6 +820,7 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::t
                         _locks[index].unlock();
                         _locks[p_index].unlock();
 
+                        fprintf(stderr, "[RM]: remove key %d succees\n", key);
                         return status;
 
                     } else { // na failed
@@ -828,7 +839,6 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::t
             // do nothing
         } // p failed
     }
-    return status;
 }
 
 template <typename Key, typename Value, typename KeyFromValue, typename Hash, typename KeyEqual, typename KeySmaller, typename Allocator>
@@ -928,7 +938,7 @@ inline STDGPU_DEVICE_ONLY bool
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::occupied(const index_t n) const
 {
     STDGPU_EXPECTS(0 <= n);
-    fprintf(stderr, "n: %d, tc: %d\n", n, total_count());
+//    fprintf(stderr, "n: %d, tc: %d\n", n, total_count());
     STDGPU_EXPECTS(n < total_count());
 
     return _occupied[n];
@@ -1097,12 +1107,12 @@ ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::c
     detail::vector_clear_iota<index_t, index_allocator_type>(result._excess_list_positions, bucket_count);
 
     // init the tree
-    allocator_traits<allocator_type>::construct(result._allocator, &(result._values[total_count - 1]), 0x3f3f3f3f);
+    allocator_traits<allocator_type>::construct(result._allocator, &(result._values[total_count / 2 - 1]), 0x3f3f3f3f);
     allocator_traits<allocator_type>::construct(result._allocator, &(result._values[0]), -0x3f3f3f3f);
 
     allocator_traits<allocator_type>::construct(result._allocator, &(result._internal_values[0]), -0x3f3f3f3f);
     result._offsets_l[0] = 0;
-    result._offsets_r[0] = total_count - 1;
+    result._offsets_r[total_count / 2] = total_count / 2 - 1;
 
     STDGPU_ENSURES(result._excess_list_positions.full());
 
@@ -1114,6 +1124,11 @@ void
 ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>::destroyDeviceObject(
         ordered_base<Key, Value, KeyFromValue, Hash, KeyEqual, KeySmaller, Allocator>& device_object)
 {
+    fprintf(stderr, "current struct:\n");
+    fprintf(stderr, "c: %d, l: %d, r: %d\n", device_object._internal_values[300], device_object._offsets_l[300], device_object._offsets_r[300]);
+    fprintf(stderr, "c: %d, l: %d, r: %d\n", device_object._internal_values[219], device_object._offsets_l[519], device_object._offsets_r[519]);
+
+
     if (!detail::is_allocator_destroy_optimizable<value_type, allocator_type>())
     {
         device_object.clear();

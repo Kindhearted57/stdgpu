@@ -12,7 +12,7 @@
 void
 insert_neighbors(const int* b_input, const stdgpu::index_t n, stdgpu::btree<int> &btree)
 {
-#pragma omp parallel for
+//#pragma omp parallel for
     for (stdgpu::index_t i = 0; i < n; ++i)
     {
         int num = b_input[i];
@@ -23,6 +23,24 @@ insert_neighbors(const int* b_input, const stdgpu::index_t n, stdgpu::btree<int>
         }
     }
 }
+
+
+void
+remove_neighbors(const int* b_input, const stdgpu::index_t n, stdgpu::btree<int> &btree)
+{
+//#pragma omp parallel for
+    for (stdgpu::index_t i = 0; i < n; ++i)
+    {
+        int num = b_input[i];
+        int num_neighborhood[3] = { num + 2, num + 3, num + 4};
+        for (int num_neighbor: num_neighborhood){
+            // dump everythin into the tree
+            btree.erase(num_neighbor);
+        }
+    }
+}
+
+
 int
 main()
 {
@@ -43,6 +61,16 @@ main()
 
     std::cout << "The set of duplicated numbers contains " << btree.size() << " elements (" << n + 2
               << " expected) and the computed sum is " << sum << " (" << sum_closed_form << " expected)" << std::endl;
+
+    remove_neighbors(b_input, n, btree);
+    range_btree = btree.device_range();
+    sum = thrust::reduce(range_btree.begin(), range_btree.end(), 0, thrust::plus<int>());
+    const int sum_closed_form2 = 0;
+
+    std::cout << "The set of duplicated numbers contains " << btree.size() << " elements (" << 0
+              << " expected) and the computed sum is " << sum << " (" << sum_closed_form2 << " expected)" << std::endl;
+
+
 
     destroyDeviceArray<int>(b_input);
     stdgpu::btree<int>::destroyDeviceObject(btree);
